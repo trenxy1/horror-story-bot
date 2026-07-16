@@ -5,7 +5,9 @@ youtube_token.json
 .env
 
 # Local run output
-output/
+output/audio/
+output/images/
+output/videos/
 
 # Python
 __pycache__/
