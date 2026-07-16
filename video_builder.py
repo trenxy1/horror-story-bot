@@ -1,8 +1,7 @@
 """
-Step 5: Assemble images + voiceover + captions into a finished MP4.
-Supports "landscape" (main channel) and "vertical" (Shorts) orientations.
-Caption chunking is word-count based (not a fixed division) so it scales
-correctly for both a 60-second short and a 12-minute long-form story.
+Assembles scenes (text + matching AI-generated image) into a finished MP4.
+Caption style: bold, tight lines, plain stroke outline (no background box) —
+closer to the clean reference look than the old boxed-caption style.
 """
 import textwrap
 from pathlib import Path
@@ -15,8 +14,8 @@ from moviepy.editor import (
 import config
 
 FPS = 24
-FONT = "DejaVu-Sans-Bold"
-WORDS_PER_CAPTION = 14   # roughly how many words show on screen at once
+FONT = "DejaVu-Sans-Bold-Oblique"   # bold italic-leaning — closer to the reference style
+FONT_FALLBACK = "DejaVu-Sans-Bold"  # used automatically if the oblique variant isn't found
 
 ORIENTATIONS = {
     "landscape": {"w": 1920, "h": 1080},
@@ -29,68 +28,59 @@ def _cover_scale(clip, target_w, target_h):
     return max(target_w / img_w, target_h / img_h)
 
 
-def _ken_burns_clip(img_path: Path, duration: float, w: int, h: int, zoom_ratio: float = 0.06):
+def _ken_burns_clip(img_path: Path, duration: float, w: int, h: int, zoom_ratio: float = 0.05):
     clip = ImageClip(str(img_path)).set_duration(duration)
-    base_scale = _cover_scale(clip, w, h) * 1.1
+    base_scale = _cover_scale(clip, w, h) * 1.08
     clip = clip.fx(vfx.resize, lambda t: base_scale * (1 + zoom_ratio * (t / duration)))
     clip = clip.set_position("center")
     return clip
 
 
-def _caption_chunks(script_text: str, words_per_chunk: int = WORDS_PER_CAPTION) -> list[str]:
-    words = script_text.replace("\n", " ").split()
-    return [" ".join(words[i:i + words_per_chunk]) for i in range(0, len(words), words_per_chunk)]
-
-
-def _wrapped_caption(text: str, duration: float, start: float, w: int, h: int, wrap_width: int):
+def _make_text_clip(text: str, fontsize: int, w: int, wrap_width: int, stroke_width: int):
     wrapped = "\n".join(textwrap.wrap(text, width=wrap_width))
-    txt = TextClip(
-        wrapped, fontsize=42 if w < h else 46, color="white", font=FONT,
-        stroke_color="black", stroke_width=3,
-        method="caption", size=(w - 120, None), align="center",
-        bg_color="rgba(0,0,0,0.6)",
-    )
-    bottom_margin = 500 if w < h else 280
-    txt = txt.set_position(("center", h - bottom_margin)).set_start(start).set_duration(duration)
-    return txt
+    try:
+        return TextClip(
+            wrapped, fontsize=fontsize, color="white", font=FONT,
+            stroke_color="black", stroke_width=stroke_width,
+            method="caption", size=(w - 100, None), align="center",
+        )
+    except Exception:
+        return TextClip(
+            wrapped, fontsize=fontsize, color="white", font=FONT_FALLBACK,
+            stroke_color="black", stroke_width=stroke_width,
+            method="caption", size=(w - 100, None), align="center",
+        )
 
 
-def build_video(images: list[Path], audio_path: Path, script_text: str,
-                 title_card: str, output_path: Path, orientation: str = "landscape") -> Path:
+def build_video_from_scenes(scenes: list[dict], audio_path: Path, output_path: Path,
+                             orientation: str = "landscape") -> Path:
+    """scenes: list of {"text": str, "image": Path, "duration": float}
+    Each scene gets its own Ken Burns image clip and its own caption, timed
+    to exactly match that portion of the audio."""
     dims = ORIENTATIONS[orientation]
     w, h = dims["w"], dims["h"]
-    wrap_width = 26 if orientation == "vertical" else 36
+    wrap_width = 22 if orientation == "vertical" else 32
+    fontsize = 54 if orientation == "vertical" else 58
 
     audio = AudioFileClip(str(audio_path))
-    duration = audio.duration
 
-    if not images:
-        raise ValueError("No images provided for video assembly")
+    bg_clips = []
+    caption_clips = []
+    t_cursor = 0.0
+    for scene in scenes:
+        dur = scene["duration"]
+        bg_clips.append(_ken_burns_clip(scene["image"], dur, w, h))
 
-    per_image = duration / len(images)
-    bg_clips = [_ken_burns_clip(p, per_image, w, h) for p in images]
+        cap = _make_text_clip(scene["text"], fontsize, w, wrap_width, stroke_width=3)
+        bottom_margin = 420 if orientation == "vertical" else 220
+        cap = cap.set_position(("center", h - bottom_margin)).set_start(t_cursor).set_duration(dur)
+        caption_clips.append(cap)
+
+        t_cursor += dur
+
     background = concatenate_videoclips(bg_clips, method="compose").set_audio(audio)
 
-    title_top = 200 if orientation == "vertical" else None
-    title_txt = TextClip(
-        title_card, fontsize=50 if orientation == "vertical" else 56, color="white", font=FONT,
-        stroke_color="black", stroke_width=4,
-        method="caption", size=(w - 160, None), align="center",
-        bg_color="rgba(0,0,0,0.55)",
-    )
-    pos = ("center", title_top) if title_top else "center"
-    title_txt = title_txt.set_position(pos).set_start(0).set_duration(min(4, duration))
-
-    chunks = _caption_chunks(script_text)
-    caption_clips = []
-    if chunks:
-        seg = duration / len(chunks)
-        for i, chunk in enumerate(chunks):
-            caption_clips.append(_wrapped_caption(chunk, seg, i * seg, w, h, wrap_width))
-
-    final = CompositeVideoClip(
-        [background, title_txt, *caption_clips], size=(w, h)
-    )
+    final = CompositeVideoClip([background, *caption_clips], size=(w, h))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     final.write_videofile(
@@ -101,4 +91,5 @@ def build_video(images: list[Path], audio_path: Path, script_text: str,
 
 
 if __name__ == "__main__":
-    print("Run this via main.py — it needs images + an audio file + a script to work with.")
+    print("Run this via main.py — needs scenes with matching images + an audio file.")
+                                 
