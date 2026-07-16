@@ -69,13 +69,29 @@ def generate_long_story(theme: str) -> str:
     return _generate(config.SYSTEM_PROMPT_LONG, theme, max_tokens=3000, timeout=120)
 
 
-def generate_short_story(theme: str) -> str:
-    return _generate(config.SYSTEM_PROMPT_SHORT, theme, max_tokens=400, timeout=60)
+def generate_teaser(full_story_text: str) -> str:
+    user_prompt = f"FULL STORY TEXT:\n\n{full_story_text}\n\nWrite the teaser now."
+    providers = [_call_gemini, _call_groq] if config.LLM_PROVIDER == "gemini" else [_call_groq, _call_gemini]
+
+    errors = []
+    for fn in providers:
+        try:
+            result = fn(config.SYSTEM_PROMPT_TEASER, user_prompt, timeout=60, max_tokens=400)
+            if result:
+                return result
+        except Exception as e:
+            errors.append(f"{fn.__name__}: {e}")
+            print(f"[WARN] {fn.__name__} failed, trying next provider: {e}")
+
+    raise RuntimeError("All LLM providers failed generating teaser:\n" + "\n".join(errors))
 
 
 if __name__ == "__main__":
     import theme_bank
     picked = theme_bank.get_next_theme()
     print(f"Theme: {picked['theme']}\n")
-    print("=== SHORT STORY ===")
-    print(generate_short_story(picked["theme"]))
+    story = generate_long_story(picked["theme"])
+    print("=== LONG STORY ===")
+    print(story)
+    print("\n=== TEASER ===")
+    print(generate_teaser(story))
