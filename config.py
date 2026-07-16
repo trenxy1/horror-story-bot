@@ -16,9 +16,6 @@ for d in (DATA_DIR, AUDIO_DIR, IMAGE_DIR, VIDEO_DIR):
 THEMES_FILE = DATA_DIR / "themes.json"
 
 # ---------- STORY THEMES ----------
-# A rotating bank of horror premises. Each run picks the next unused one.
-# When all are used, the pool resets (themes can repeat after a full cycle —
-# the AI writes a different story from the same premise each time anyway).
 THEME_BANK = [
     "a family moves into a house where the previous owners vanished without a trace",
     "a night-shift hospital worker keeps hearing their own name called from empty rooms",
@@ -56,18 +53,29 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
 
 # ---------- SYSTEM PROMPTS ----------
-# Both prompts keep content fictional, atmosphere-driven, and free of graphic
-# gore, real people, or anything that reads as instructional self-harm/violence
-# content — this matters for YouTube monetization/policy, not just taste.
-
 SYSTEM_PROMPT_LONG = """You are a horror fiction narrator writing a long-form
 scary story for narration (target: 1500-2000 words, roughly 10-13 minutes
-spoken aloud).
+spoken aloud). This will be posted to YouTube, where the first 5-8 seconds
+decide whether someone keeps watching or scrolls away — the opening has to
+work harder than anything else in the story.
 
-RULES:
+OPENING (critical):
+- The very first sentence must create an immediate question in the
+  listener's mind — something strange, unsettling, or specific enough that
+  they need to know more. Never open with scene-setting, weather, or "it was
+  a normal day" — start at the first wrong detail or a striking line of
+  action/dialogue instead.
+- Do not spend the opening establishing backstory. Drop the listener into
+  the situation already slightly off, and let context fill in as it goes.
+- Bad opening example (too slow): "I've always lived in a quiet town, and
+  nothing much ever happened there, until one day..."
+  Good opening example (immediate hook): "The first time the house called
+  my name, I thought it was my sister playing a joke."
+
+RULES FOR THE REST OF THE STORY:
 - Purely fictional. Never reference real people, real deaths, or real events.
-- Build dread gradually: ordinary setting, small wrongness, escalating unease,
-  a genuinely unsettling turn or twist near the end.
+- Build dread steadily after the hook: escalating unease, small wrongness
+  compounding, a genuinely unsettling turn or twist near the end.
 - Atmosphere and psychological tension over graphic violence or gore. No
   detailed descriptions of injury, torture, or extreme violence.
 - No content depicting or instructing self-harm.
@@ -75,45 +83,59 @@ RULES:
 - Write in flowing narrative prose, broken into natural paragraphs — this
   will be read aloud by a text-to-speech voice, so favor clear sentence
   rhythm over complex structure.
+- Write in short, vivid, filmable sentences and beats — each sentence or
+  short group of sentences should evoke a clear, concrete visual image
+  (a hallway, a face, an object, a shadow), since each beat will become its
+  own AI-generated illustration. Avoid long abstract passages with nothing
+  visual to depict.
 - End on a lingering, unresolved unease rather than a neat resolution —
   horror stories land best when something is left unexplained.
 - Output ONLY the story text. No title, no preamble, no markdown.
 """
 
-SYSTEM_PROMPT_SHORT = """You are a horror fiction narrator writing a very
-short scary story for a YouTube Short (target: 120-160 words, roughly 45-60
-seconds spoken aloud).
+SYSTEM_PROMPT_TEASER = """You are cutting a short, high-tension teaser from a
+full horror story, to hook viewers into watching the complete story on the
+main channel. Target: 100-140 words, roughly 40-55 seconds spoken aloud.
+
+You will be given the FULL STORY TEXT. Do not write a new story — extract or
+lightly rework the single most unsettling, curiosity-inducing moment from it
+(often the strangest early wrongness, or a striking mid-story beat — NOT the
+ending or the twist, never spoil the resolution).
+
+OPENING (critical): On Shorts, viewers decide to keep watching or swipe away
+within 1-2 seconds. Your first sentence must land immediately — a strange
+statement, a striking piece of dialogue, or an unsettling fact stated
+plainly. Never open with "so this happened" or any throat-clearing — start
+inside the strange moment itself.
 
 RULES:
-- Purely fictional. Never reference real people, real deaths, or real events.
-- One unsettling idea, delivered fast: setup, a wrong detail, a gut-punch
-  final line. No slow build — this needs to hook in the first sentence.
-- Atmosphere and psychological unease over graphic violence or gore.
-- No content depicting or instructing self-harm.
-- The final sentence should land like a twist or a chill, something that
-  makes someone want to see more from the channel.
-- Output ONLY the story text. No title, no preamble, no markdown.
+- Write in short, vivid, concrete beats — each should evoke a clear visual
+  image, since each beat becomes its own AI-generated illustration.
+- Build to a moment of dread or a strange, unresolved detail, then cut off —
+  leave the viewer needing to know what happens next.
+- Do not reveal the story's ending or final twist.
+- End with a short, natural call-to-action inviting the viewer to watch the
+  full story on the channel (e.g. "The rest of what happened... you need to
+  hear it. Full story on the channel.") — keep it brief, one sentence.
+- Same fictional-only, atmosphere-over-gore rules as the full story.
+- Output ONLY the teaser text. No title, no preamble, no markdown.
 """
 
 # ---------- TTS ----------
-# Slightly slower pace reads as more ominous for horror narration.
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-GB-RyanNeural")
 TTS_RATE = os.environ.get("TTS_RATE", "-8%")
 
-# ---------- IMAGES (Pexels) ----------
-PEXELS_API_KEY = os.environ.get("PEXELS_API_KEY", "")
-IMAGE_SEARCH_QUERIES = [
-    "foggy forest night",
-    "abandoned house dark",
-    "empty hallway shadow",
-    "old mirror dim light",
-    "creepy abandoned building",
-    "dark woods path",
-    "old house window night",
-    "empty room moonlight",
-]
-IMAGES_PER_LONG_VIDEO = 14   # more images for longer runtime
-IMAGES_PER_SHORT_VIDEO = 5
+# ---------- AI IMAGE GENERATION (Pollinations.ai — free, no API key) ----------
+# Pexels is no longer used for this bot — every image is custom-generated to
+# match that specific moment of the story, which is what gets the "clean,
+# cinematic" look instead of generic stock photos.
+IMAGE_STYLE_SUFFIX = (
+    "cinematic horror photography, moody blue and purple lighting, high detail, "
+    "film grain, dramatic shadows, atmospheric, 8k quality"
+)
+WORDS_PER_SCENE_LONG = 45     # ~35-45 images for a 1500-2000 word story
+WORDS_PER_SCENE_TEASER = 15   # ~7-9 images for a 100-140 word teaser (faster pace, matches Shorts style)
+IMAGE_GEN_MAX_WORKERS = 4     # parallel image generations at once
 
 # ---------- YOUTUBE ----------
 YOUTUBE_CLIENT_SECRET_FILE = str(BASE_DIR / "client_secret.json")
