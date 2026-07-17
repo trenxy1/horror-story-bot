@@ -1,8 +1,9 @@
 """
 Orchestrator: picks one theme, generates a long story + a teaser cut from it,
-generates one AI image per SENTENCE-LEVEL scene (so every image matches
-exactly what's being said at that moment), builds both videos, and uploads
-both (teaser links to the full story).
+generates one AI image per sentence-level scene using REAL word-timestamp
+data from the TTS engine (so captions and images stay perfectly synced to
+the actual spoken audio, no drift), builds both videos, and uploads both
+(teaser links to the full story).
 
 Usage:
     py main.py                # build both, don't upload
@@ -28,13 +29,13 @@ def _story_id(theme: str) -> str:
     return hashlib.sha256(f"{theme}{date.today().isoformat()}".encode()).hexdigest()[:12]
 
 
-def _build_one_video(text: str, audio_path, story_id: str,
+def _build_one_video(audio_path, boundaries, story_id: str,
                       tag: str, orientation: str, output_path) -> None:
-    duration = AudioFileClip(str(audio_path)).duration
+    total_duration = AudioFileClip(str(audio_path)).duration
 
-    scenes = scene_builder.build_scenes(text, duration)
-    print(f"  {len(scenes)} scenes for {tag} ({duration:.0f}s total audio, "
-          f"~{duration / max(len(scenes), 1):.1f}s/scene average)")
+    scenes = scene_builder.build_scenes(boundaries, total_audio_duration=total_duration)
+    print(f"  {len(scenes)} scenes for {tag} ({total_duration:.0f}s total audio, "
+          f"real word-timing aligned)")
 
     dims = video_builder.ORIENTATIONS[orientation]
     image_paths = image_generate.generate_images_for_scenes(
@@ -61,19 +62,19 @@ def process_story_and_teaser(theme: str, do_upload: bool) -> list[str]:
     teaser_text = script_generator.generate_teaser(story_text)
     print(f"({len(teaser_text.split())} words)")
 
-    print("[3/6] Generating long-story voiceover...")
-    long_audio = tts_generator.generate_audio(story_text, f"{story_id}_long")
+    print("[3/6] Generating long-story voiceover + word timing...")
+    long_audio, long_boundaries = tts_generator.generate_audio_with_timing(story_text, f"{story_id}_long")
 
-    print("[4/6] Generating teaser voiceover...")
-    teaser_audio = tts_generator.generate_audio(teaser_text, f"{story_id}_teaser")
+    print("[4/6] Generating teaser voiceover + word timing...")
+    teaser_audio, teaser_boundaries = tts_generator.generate_audio_with_timing(teaser_text, f"{story_id}_teaser")
 
     print("[5/6] Generating AI images + building long-form video...")
     long_path = config.VIDEO_DIR / f"{date.today().isoformat()}_{story_id}_long.mp4"
-    _build_one_video(story_text, long_audio, story_id, "long", "landscape", long_path)
+    _build_one_video(long_audio, long_boundaries, story_id, "long", "landscape", long_path)
 
     print("[6/6] Generating AI images + building teaser video...")
     teaser_path = config.VIDEO_DIR / f"{date.today().isoformat()}_{story_id}_teaser.mp4"
-    _build_one_video(teaser_text, teaser_audio, story_id, "teaser", "vertical", teaser_path)
+    _build_one_video(teaser_audio, teaser_boundaries, story_id, "teaser", "vertical", teaser_path)
 
     print(f"[OK] Videos saved: {long_path}, {teaser_path}")
     produced = [str(long_path), str(teaser_path)]
