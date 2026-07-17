@@ -1,7 +1,8 @@
 """
 Orchestrator: picks one theme, generates a long story + a teaser cut from it,
-generates AI images matched to each scene of both, builds both videos, and
-uploads both (teaser links to the full story).
+generates one AI image per SENTENCE-LEVEL scene (so every image matches
+exactly what's being said at that moment), builds both videos, and uploads
+both (teaser links to the full story).
 
 Usage:
     py main.py                # build both, don't upload
@@ -27,21 +28,19 @@ def _story_id(theme: str) -> str:
     return hashlib.sha256(f"{theme}{date.today().isoformat()}".encode()).hexdigest()[:12]
 
 
-def _build_one_video(text: str, audio_path, words_per_scene: int, story_id: str,
+def _build_one_video(text: str, audio_path, story_id: str,
                       tag: str, orientation: str, output_path) -> None:
     duration = AudioFileClip(str(audio_path)).duration
 
-    scenes = scene_builder.build_scenes(text, words_per_scene, duration)
-    print(f"  {len(scenes)} scenes for {tag}")
+    scenes = scene_builder.build_scenes(text, duration)
+    print(f"  {len(scenes)} scenes for {tag} ({duration:.0f}s total audio, "
+          f"~{duration / max(len(scenes), 1):.1f}s/scene average)")
 
     dims = video_builder.ORIENTATIONS[orientation]
     image_paths = image_generate.generate_images_for_scenes(
         [s["text"] for s in scenes], f"{story_id}_{tag}", dims["w"], dims["h"],
-        max_workers=config.IMAGE_GEN_MAX_WORKERS,
     )
 
-    # if some images failed to generate, scene count and image count may
-    # mismatch — trim scenes to match available images so nothing crashes
     scenes = scenes[: len(image_paths)]
     for scene, img_path in zip(scenes, image_paths):
         scene["image"] = img_path
@@ -70,13 +69,11 @@ def process_story_and_teaser(theme: str, do_upload: bool) -> list[str]:
 
     print("[5/6] Generating AI images + building long-form video...")
     long_path = config.VIDEO_DIR / f"{date.today().isoformat()}_{story_id}_long.mp4"
-    _build_one_video(story_text, long_audio, config.WORDS_PER_SCENE_LONG, story_id,
-                      "long", "landscape", long_path)
+    _build_one_video(story_text, long_audio, story_id, "long", "landscape", long_path)
 
     print("[6/6] Generating AI images + building teaser video...")
     teaser_path = config.VIDEO_DIR / f"{date.today().isoformat()}_{story_id}_teaser.mp4"
-    _build_one_video(teaser_text, teaser_audio, config.WORDS_PER_SCENE_TEASER, story_id,
-                      "teaser", "vertical", teaser_path)
+    _build_one_video(teaser_text, teaser_audio, story_id, "teaser", "vertical", teaser_path)
 
     print(f"[OK] Videos saved: {long_path}, {teaser_path}")
     produced = [str(long_path), str(teaser_path)]
@@ -126,4 +123,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-        
