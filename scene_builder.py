@@ -1,75 +1,92 @@
 """
-Splits a story into scenes by SENTENCE (not a fixed word count or time
-duration) — each scene is one complete thought/beat, so the AI-generated
-image for that scene has a clear, coherent thing to actually depict (a
-sentence cut in half produces a muddled, confused image prompt).
-
-Very short sentences get merged with a neighbor so captions don't flicker
-too fast; very long sentences get split at a natural point so a single
-image isn't stretched across too much text.
+Groups TTS word-boundary timing data into scenes — each scene is one
+complete sentence-level beat with a REAL start/end time taken directly from
+when those words were actually spoken (not estimated). This is what
+eliminates caption/image drift over the course of a long video.
 """
-import re
-
-MIN_WORDS_PER_SCENE = 5     # merge short sentences until at least this many words
-MAX_WORDS_PER_SCENE = 22    # split long sentences beyond this many words
+MIN_WORDS_PER_SCENE = 5
+MAX_WORDS_PER_SCENE = 22
 
 
-def _split_into_sentences(text: str) -> list[str]:
-    text = text.replace("\n", " ").strip()
-    raw = re.split(r'(?<=[.!?])\s+', text)
-    return [s.strip() for s in raw if s.strip()]
+def _group_into_sentences(boundaries: list[dict]) -> list[list[dict]]:
+    groups = []
+    current = []
+    for b in boundaries:
+        current.append(b)
+        if b["word"].strip().endswith((".", "!", "?")):
+            groups.append(current)
+            current = []
+    if current:
+        groups.append(current)
+    return groups
 
 
-def _split_long_sentence(sentence: str, max_words: int) -> list[str]:
-    words = sentence.split()
-    if len(words) <= max_words:
-        return [sentence]
-    return [" ".join(words[i:i + max_words]) for i in range(0, len(words), max_words)]
+def _split_long_group(group: list[dict], max_words: int) -> list[list[dict]]:
+    if len(group) <= max_words:
+        return [group]
+    return [group[i:i + max_words] for i in range(0, len(group), max_words)]
 
 
-def _merge_short_sentences(sentences: list[str], min_words: int) -> list[str]:
+def _merge_short_groups(groups: list[list[dict]], min_words: int) -> list[list[dict]]:
     merged = []
-    buffer = ""
-    for s in sentences:
-        buffer = f"{buffer} {s}".strip() if buffer else s
-        if len(buffer.split()) >= min_words:
+    buffer: list[dict] = []
+    for g in groups:
+        buffer.extend(g)
+        if len(buffer) >= min_words:
             merged.append(buffer)
-            buffer = ""
+            buffer = []
     if buffer:
         if merged:
-            merged[-1] = f"{merged[-1]} {buffer}".strip()
+            merged[-1] = merged[-1] + buffer
         else:
             merged.append(buffer)
     return merged
 
 
-def chunk_into_scene_texts(text: str) -> list[str]:
-    sentences = _split_into_sentences(text)
-
-    split_long = []
-    for s in sentences:
-        split_long.extend(_split_long_sentence(s, MAX_WORDS_PER_SCENE))
-
-    return _merge_short_sentences(split_long, MIN_WORDS_PER_SCENE)
-
-
-def build_scenes(text: str, total_audio_duration: float) -> list[dict]:
-    chunks = chunk_into_scene_texts(text)
-    if not chunks:
+def build_scenes(boundaries: list[dict], total_audio_duration: float | None = None) -> list[dict]:
+    """boundaries: word-timing list from tts_generator.generate_audio_with_timing.
+    Returns [{"text": str, "duration": float}, ...] with durations taken from
+    real speech timing, contiguous (no gaps/overlaps). If total_audio_duration
+    is given, the final scene is stretched to cover any trailing silence
+    after the last word, so captions don't end early."""
+    if not boundaries:
         return []
 
-    total_words = sum(len(c.split()) for c in chunks) or 1
+    sentence_groups = _group_into_sentences(boundaries)
+
+    split_groups = []
+    for g in sentence_groups:
+        split_groups.extend(_split_long_group(g, MAX_WORDS_PER_SCENE))
+
+    final_groups = _merge_short_groups(split_groups, MIN_WORDS_PER_SCENE)
+
     scenes = []
-    for chunk in chunks:
-        share = len(chunk.split()) / total_words
-        scenes.append({"text": chunk, "duration": total_audio_duration * share})
+    prev_end = 0.0
+    for group in final_groups:
+        text = " ".join(b["word"] for b in group)
+        start = prev_end
+        end = group[-1]["end"]
+        duration = max(end - start, 0.1)
+        scenes.append({"text": text, "duration": duration})
+        prev_end = end
+
+    if total_audio_duration and scenes:
+        covered = sum(s["duration"] for s in scenes)
+        leftover = total_audio_duration - covered
+        if leftover > 0:
+            scenes[-1]["duration"] += leftover
 
     return scenes
 
 
 if __name__ == "__main__":
-    sample = ("The house was quiet. Too quiet. Then the floor creaked upstairs, "
-              "even though no one else was home. I called out, but nothing "
-              "answered back. Just silence, and then, somehow, closer silence.")
-    for s in build_scenes(sample, total_audio_duration=20.0):
-        print(f"{s['duration']:.1f}s ({len(s['text'].split())}w): {s['text']}")
+    sample_boundaries = [
+        {"word": "The", "start": 0.0, "end": 0.2},
+        {"word": "house", "start": 0.2, "end": 0.5},
+        {"word": "was", "start": 0.5, "end": 0.7},
+        {"word": "quiet.", "start": 0.7, "end": 1.1},
+        {"word": "Too", "start": 1.3, "end": 1.5},
+        {"word": "quiet.", "start": 1.5, "end": 1.9},
+    ]
+    for s in build_scenes(sample_boundaries):
+        print(s)
