@@ -102,7 +102,7 @@ def build_video_from_scenes(scenes: list[dict], audio_path: Path, output_path: P
     output_path.parent.mkdir(parents=True, exist_ok=True)
     final.write_videofile(
         str(output_path), fps=FPS, codec="libx264", audio_codec="aac",
-        preset="medium", threads=4,
+        preset="veryfast", threads=2,
     )
     return output_path
 
