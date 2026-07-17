@@ -1,7 +1,9 @@
 """
 Assembles scenes (text + matching AI-generated image) into a finished MP4.
-Caption style: bold, tight lines, plain stroke outline (no background box) —
-closer to the clean reference look than the old boxed-caption style.
+Includes crossfade transitions between scenes and alternating zoom-in/zoom-out
+motion, so fast-changing AI images read as smooth/produced rather than a
+choppy slideshow. Works with any scene list (each scene just needs "text",
+"duration", and "image") regardless of how those scenes were chunked upstream.
 """
 import textwrap
 from pathlib import Path
@@ -14,8 +16,9 @@ from moviepy.editor import (
 import config
 
 FPS = 24
-FONT = "DejaVu-Sans-Bold-Oblique"   # bold italic-leaning — closer to the reference style
-FONT_FALLBACK = "DejaVu-Sans-Bold"  # used automatically if the oblique variant isn't found
+FONT = "DejaVu-Sans-Bold-Oblique"
+FONT_FALLBACK = "DejaVu-Sans-Bold"
+CROSSFADE_DURATION = 0.35   # seconds — subtle, smooths cuts without feeling slow
 
 ORIENTATIONS = {
     "landscape": {"w": 1920, "h": 1080},
@@ -28,10 +31,20 @@ def _cover_scale(clip, target_w, target_h):
     return max(target_w / img_w, target_h / img_h)
 
 
-def _ken_burns_clip(img_path: Path, duration: float, w: int, h: int, zoom_ratio: float = 0.05):
+def _ken_burns_clip(img_path: Path, duration: float, w: int, h: int, zoom_direction: int):
+    """zoom_direction: 1 = zoom in, -1 = zoom out. Alternating this across
+    scenes reads as more dynamic/intentional than every clip zooming the
+    same way."""
     clip = ImageClip(str(img_path)).set_duration(duration)
-    base_scale = _cover_scale(clip, w, h) * 1.08
-    clip = clip.fx(vfx.resize, lambda t: base_scale * (1 + zoom_ratio * (t / duration)))
+    base_scale = _cover_scale(clip, w, h) * 1.12
+    zoom_ratio = 0.09
+
+    if zoom_direction >= 0:
+        scale_fn = lambda t: base_scale * (1 + zoom_ratio * (t / duration))
+    else:
+        scale_fn = lambda t: base_scale * (1 + zoom_ratio) * (1 - zoom_ratio * 0.6 * (t / duration))
+
+    clip = clip.fx(vfx.resize, scale_fn)
     clip = clip.set_position("center")
     return clip
 
@@ -54,9 +67,6 @@ def _make_text_clip(text: str, fontsize: int, w: int, wrap_width: int, stroke_wi
 
 def build_video_from_scenes(scenes: list[dict], audio_path: Path, output_path: Path,
                              orientation: str = "landscape") -> Path:
-    """scenes: list of {"text": str, "image": Path, "duration": float}
-    Each scene gets its own Ken Burns image clip and its own caption, timed
-    to exactly match that portion of the audio."""
     dims = ORIENTATIONS[orientation]
     w, h = dims["w"], dims["h"]
     wrap_width = 22 if orientation == "vertical" else 32
@@ -67,9 +77,15 @@ def build_video_from_scenes(scenes: list[dict], audio_path: Path, output_path: P
     bg_clips = []
     caption_clips = []
     t_cursor = 0.0
-    for scene in scenes:
+
+    for i, scene in enumerate(scenes):
         dur = scene["duration"]
-        bg_clips.append(_ken_burns_clip(scene["image"], dur, w, h))
+        zoom_dir = 1 if i % 2 == 0 else -1
+
+        clip = _ken_burns_clip(scene["image"], dur, w, h, zoom_dir)
+        if i > 0:
+            clip = clip.crossfadein(CROSSFADE_DURATION)
+        bg_clips.append(clip)
 
         cap = _make_text_clip(scene["text"], fontsize, w, wrap_width, stroke_width=3)
         bottom_margin = 420 if orientation == "vertical" else 220
@@ -78,7 +94,8 @@ def build_video_from_scenes(scenes: list[dict], audio_path: Path, output_path: P
 
         t_cursor += dur
 
-    background = concatenate_videoclips(bg_clips, method="compose").set_audio(audio)
+    background = concatenate_videoclips(bg_clips, method="compose", padding=-CROSSFADE_DURATION)
+    background = background.set_audio(audio).set_duration(audio.duration)
 
     final = CompositeVideoClip([background, *caption_clips], size=(w, h))
 
@@ -92,4 +109,3 @@ def build_video_from_scenes(scenes: list[dict], audio_path: Path, output_path: P
 
 if __name__ == "__main__":
     print("Run this via main.py — needs scenes with matching images + an audio file.")
-                                 
