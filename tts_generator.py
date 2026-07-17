@@ -3,13 +3,21 @@ Converts a story script to an MP3 voiceover using edge-tts, AND captures the
 exact spoken timestamp of every word (via edge-tts's WordBoundary events).
 This timing data is what lets captions/images align to the real audio
 instead of an estimated proportion — no drift over long videos.
+
+Retries the whole generation if boundaries come back empty — this is usually
+a transient websocket hiccup talking to Microsoft's TTS service, not a real
+failure, and a retry resolves it most of the time.
 """
 import asyncio
+import time
 from pathlib import Path
 
 import edge_tts
 
 import config
+
+MAX_ATTEMPTS = 3
+RETRY_DELAY = 5.0  # seconds between attempts
 
 
 async def _generate(text: str, out_path: Path, voice: str, rate: str) -> list[dict]:
@@ -30,25 +38,35 @@ async def _generate(text: str, out_path: Path, voice: str, rate: str) -> list[di
 
 def generate_audio_with_timing(script_text: str, filename: str, voice: str | None = None,
                                 rate: str | None = None) -> tuple[Path, list[dict]]:
-    """Returns (audio_path, word_boundaries). word_boundaries is a list of
-    {"word": str, "start": float, "end": float} in seconds, one per spoken
-    word, in order — the real timing data captions/scenes should align to."""
+    """Returns (audio_path, word_boundaries). Retries up to MAX_ATTEMPTS times
+    if the TTS stream comes back without word-timing data (usually a
+    transient connection issue, not a real failure)."""
     voice = voice or config.TTS_VOICE
     rate = rate or config.TTS_RATE
     out_path = config.AUDIO_DIR / f"{filename}.mp3"
 
-    boundaries = asyncio.run(_generate(script_text, out_path, voice, rate))
+    last_error = None
+    for attempt in range(1, MAX_ATTEMPTS + 1):
+        try:
+            boundaries = asyncio.run(_generate(script_text, out_path, voice, rate))
 
-    if not out_path.exists() or out_path.stat().st_size == 0:
-        raise RuntimeError(f"TTS failed to produce audio at {out_path}")
-    if not boundaries:
-        raise RuntimeError(
-            "TTS produced audio but no word-timing data came back — "
-            "falling back to estimated timing isn't done automatically here "
-            "so this fails loudly instead of silently drifting."
-        )
+            if not out_path.exists() or out_path.stat().st_size == 0:
+                raise RuntimeError("TTS produced no audio file")
 
-    return out_path, boundaries
+            if not boundaries:
+                raise RuntimeError("TTS produced audio but no word-timing data came back")
+
+            return out_path, boundaries
+
+        except Exception as e:
+            last_error = e
+            print(f"[WARN] TTS attempt {attempt}/{MAX_ATTEMPTS} failed for '{filename}': {e}")
+            if attempt < MAX_ATTEMPTS:
+                time.sleep(RETRY_DELAY)
+
+    raise RuntimeError(
+        f"TTS failed after {MAX_ATTEMPTS} attempts for '{filename}': {last_error}"
+    )
 
 
 def generate_audio(script_text: str, filename: str, voice: str | None = None,
