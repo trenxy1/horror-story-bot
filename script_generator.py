@@ -1,10 +1,18 @@
 """
-Step 2: Generate a horror story (long or short) from a theme premise, using
+Step 2: Generate a horror story (long or teaser) from a theme premise, using
 Gemini as primary and Groq as automatic fallback if Gemini fails.
+
+If BOTH providers fail on the first pass (e.g. both hit rate limits at the
+same moment, which happens under heavy same-day testing), wait and retry
+the whole chain once before giving up — quota windows are usually short
+(Groq's own error messages often say "retry in a few seconds").
 """
+import time
 import requests
 
 import config
+
+FULL_CHAIN_RETRY_WAIT = 45.0  # seconds — wait this long before retrying if BOTH providers failed
 
 
 def _call_gemini(system_prompt: str, user_prompt: str, timeout: int, max_tokens: int) -> str:
@@ -48,8 +56,7 @@ def _call_groq(system_prompt: str, user_prompt: str, timeout: int, max_tokens: i
     return resp.json()["choices"][0]["message"]["content"].strip()
 
 
-def _generate(system_prompt: str, theme: str, max_tokens: int, timeout: int = 90) -> str:
-    user_prompt = f"Write the story now. Premise: {theme}"
+def _try_all_providers(system_prompt: str, user_prompt: str, timeout: int, max_tokens: int) -> str:
     providers = [_call_gemini, _call_groq] if config.LLM_PROVIDER == "gemini" else [_call_groq, _call_gemini]
 
     errors = []
@@ -62,28 +69,41 @@ def _generate(system_prompt: str, theme: str, max_tokens: int, timeout: int = 90
             errors.append(f"{fn.__name__}: {e}")
             print(f"[WARN] {fn.__name__} failed, trying next provider: {e}")
 
-    raise RuntimeError(f"All LLM providers failed for theme '{theme}':\n" + "\n".join(errors))
+    raise RuntimeError("All providers failed:\n" + "\n".join(errors))
+
+
+def _generate_with_full_retry(system_prompt: str, user_prompt: str, timeout: int, max_tokens: int,
+                               label: str) -> str:
+    try:
+        return _try_all_providers(system_prompt, user_prompt, timeout, max_tokens)
+    except Exception as first_error:
+        print(f"[WARN] All providers failed for {label} on first pass. "
+              f"Waiting {FULL_CHAIN_RETRY_WAIT}s and retrying the full chain once "
+              f"(rate-limit windows are usually short)...")
+        time.sleep(FULL_CHAIN_RETRY_WAIT)
+        try:
+            return _try_all_providers(system_prompt, user_prompt, timeout, max_tokens)
+        except Exception as second_error:
+            raise RuntimeError(
+                f"All LLM providers failed for {label} even after retry.\n"
+                f"First attempt: {first_error}\nRetry attempt: {second_error}"
+            )
 
 
 def generate_long_story(theme: str) -> str:
-    return _generate(config.SYSTEM_PROMPT_LONG, theme, max_tokens=3000, timeout=120)
+    user_prompt = f"Write the story now. Premise: {theme}"
+    return _generate_with_full_retry(
+        config.SYSTEM_PROMPT_LONG, user_prompt, timeout=120, max_tokens=3000,
+        label=f"long story (theme: {theme[:50]})",
+    )
 
 
 def generate_teaser(full_story_text: str) -> str:
     user_prompt = f"FULL STORY TEXT:\n\n{full_story_text}\n\nWrite the teaser now."
-    providers = [_call_gemini, _call_groq] if config.LLM_PROVIDER == "gemini" else [_call_groq, _call_gemini]
-
-    errors = []
-    for fn in providers:
-        try:
-            result = fn(config.SYSTEM_PROMPT_TEASER, user_prompt, timeout=60, max_tokens=400)
-            if result:
-                return result
-        except Exception as e:
-            errors.append(f"{fn.__name__}: {e}")
-            print(f"[WARN] {fn.__name__} failed, trying next provider: {e}")
-
-    raise RuntimeError("All LLM providers failed generating teaser:\n" + "\n".join(errors))
+    return _generate_with_full_retry(
+        config.SYSTEM_PROMPT_TEASER, user_prompt, timeout=60, max_tokens=400,
+        label="teaser",
+    )
 
 
 if __name__ == "__main__":
