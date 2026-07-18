@@ -1,9 +1,7 @@
 """
 Orchestrator: picks one theme, generates a long story + a teaser cut from it,
 generates one AI image per sentence-level scene using REAL word-timestamp
-data from the TTS engine (so captions and images stay perfectly synced to
-the actual spoken audio, no drift), builds both videos, and uploads both
-(teaser links to the full story).
+data from the TTS engine, builds both videos, and uploads both.
 
 Usage:
     py main.py                # build both, don't upload
@@ -11,6 +9,7 @@ Usage:
 """
 import argparse
 import hashlib
+import sys
 import traceback
 from datetime import date
 
@@ -52,7 +51,6 @@ def _build_one_video(audio_path, boundaries, story_id: str,
 def process_story_and_teaser(theme: str, do_upload: bool) -> list[str]:
     print(f"\n=== theme: {theme} ===")
     story_id = _story_id(theme)
-    produced = []
 
     print("[1/6] Generating long story...")
     story_text = script_generator.generate_long_story(theme)
@@ -110,17 +108,25 @@ def main():
     theme = picked["theme"]
     print(f"Selected theme #{picked['index']}: {theme}")
 
-    try:
-        produced = process_story_and_teaser(theme, args.upload)
-    except Exception as e:
-        print(f"[ERROR] Pipeline failed: {e}")
-        traceback.print_exc()
-        produced = []
+    # IMPORTANT: no swallowing here. If the pipeline fails, this function
+    # must not return normally with an empty/partial result — that's exactly
+    # what caused GitHub to report false "success" on a run that produced
+    # nothing. Let the exception propagate; the __main__ guard below turns
+    # it into a real non-zero exit code.
+    produced = process_story_and_teaser(theme, args.upload)
 
     print(f"\n=== Done. {len(produced)}/2 videos produced. ===")
     for p in produced:
         print(" -", p)
 
+    if len(produced) < 2:
+        raise RuntimeError(f"Only {len(produced)}/2 videos were produced — treating as a failed run.")
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        print(f"Error: Pipeline failed: {e}")
+        traceback.print_exc()
+        sys.exit(1)
