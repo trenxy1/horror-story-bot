@@ -29,9 +29,17 @@ def _get_authenticated_service():
         if token_path.exists():
             creds = Credentials.from_authorized_user_file(str(token_path), SCOPES)
 
+    if creds:
+        print(f"[DEBUG] creds loaded — valid={creds.valid}, expired={creds.expired}, "
+              f"has_refresh_token={bool(creds.refresh_token)}, has_token={bool(creds.token)}")
+    else:
+        print("[DEBUG] no creds object was created at all — env var or file was empty/missing")
+
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
+            print("[DEBUG] attempting creds.refresh()...")
             creds.refresh(Request())
+            print("[DEBUG] refresh succeeded")
         else:
             if not Path(config.YOUTUBE_CLIENT_SECRET_FILE).exists():
                 raise RuntimeError(
