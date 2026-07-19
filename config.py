@@ -120,6 +120,20 @@ RULES:
 - Same fictional-only, atmosphere-over-gore rules as the full story.
 - Output ONLY the teaser text. No title, no preamble, no markdown.
 """
+SYSTEM_PROMPT_TITLE = """You write YouTube titles for horror story videos.
+You will be given the FULL STORY TEXT. Write ONE title for it.
+
+RULES:
+- Pull a specific, concrete detail from the story itself — a name, a place,
+  an object, a specific moment — never a generic phrase like "A Scary Story"
+  or "You Won't Believe This."
+- Use a proven horror-hook pattern: an unresolved question, a strange
+  detail stated plainly, or a "wasn't real... or was it" style tease.
+- Do not spoil the ending or the twist.
+- Maximum 60 characters, ideally 40-55 — it gets cut off on mobile past that.
+- No emojis, no ALL CAPS, no clickbait phrases like "You Won't Believe."
+- Output ONLY the title text. No quotation marks, no preamble, no markdown.
+"""
 
 # ---------- TTS ----------
 TTS_VOICE = os.environ.get("TTS_VOICE", "en-GB-RyanNeural")
