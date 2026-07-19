@@ -1,7 +1,9 @@
 """
 Orchestrator: picks one theme, generates a long story + a teaser cut from it,
 generates one AI image per sentence-level scene using REAL word-timestamp
-data from the TTS engine, builds both videos, and uploads both.
+data from the TTS engine, generates a hook-driven title from the story
+itself, builds both videos, and uploads both (teaser links to the full
+story).
 
 Usage:
     py main.py                # build both, don't upload
@@ -52,25 +54,29 @@ def process_story_and_teaser(theme: str, do_upload: bool) -> list[str]:
     print(f"\n=== theme: {theme} ===")
     story_id = _story_id(theme)
 
-    print("[1/6] Generating long story...")
+    print("[1/7] Generating long story...")
     story_text = script_generator.generate_long_story(theme)
     print(f"({len(story_text.split())} words)")
 
-    print("[2/6] Generating teaser cut from that story...")
+    print("[2/7] Generating teaser cut from that story...")
     teaser_text = script_generator.generate_teaser(story_text)
     print(f"({len(teaser_text.split())} words)")
 
-    print("[3/6] Generating long-story voiceover + word timing...")
+    print("[3/7] Generating title from that story...")
+    base_title = script_generator.generate_title(story_text)
+    print(f"  Generated title: {base_title}")
+
+    print("[4/7] Generating long-story voiceover + word timing...")
     long_audio, long_boundaries = tts_generator.generate_audio_with_timing(story_text, f"{story_id}_long")
 
-    print("[4/6] Generating teaser voiceover + word timing...")
+    print("[5/7] Generating teaser voiceover + word timing...")
     teaser_audio, teaser_boundaries = tts_generator.generate_audio_with_timing(teaser_text, f"{story_id}_teaser")
 
-    print("[5/6] Generating AI images + building long-form video...")
+    print("[6/7] Generating AI images + building long-form video...")
     long_path = config.VIDEO_DIR / f"{date.today().isoformat()}_{story_id}_long.mp4"
     _build_one_video(long_audio, long_boundaries, story_id, "long", "landscape", long_path)
 
-    print("[6/6] Generating AI images + building teaser video...")
+    print("[7/7] Generating AI images + building teaser video...")
     teaser_path = config.VIDEO_DIR / f"{date.today().isoformat()}_{story_id}_teaser.mp4"
     _build_one_video(teaser_audio, teaser_boundaries, story_id, "teaser", "vertical", teaser_path)
 
@@ -80,9 +86,6 @@ def process_story_and_teaser(theme: str, do_upload: bool) -> list[str]:
     if do_upload:
         import youtube_upload
 
-        base_title = script_generator.generate_title(story_text)
-        print(f"  Generated title: {base_title}")
-        
         long_description = f"{story_text}\n\n#HorrorStory #ScaryStory #Creepypasta"
         long_video_id = youtube_upload.upload_video(
             long_path, base_title, long_description, privacy="public"
@@ -109,11 +112,6 @@ def main():
     theme = picked["theme"]
     print(f"Selected theme #{picked['index']}: {theme}")
 
-    # IMPORTANT: no swallowing here. If the pipeline fails, this function
-    # must not return normally with an empty/partial result — that's exactly
-    # what caused GitHub to report false "success" on a run that produced
-    # nothing. Let the exception propagate; the __main__ guard below turns
-    # it into a real non-zero exit code.
     produced = process_story_and_teaser(theme, args.upload)
 
     print(f"\n=== Done. {len(produced)}/2 videos produced. ===")
