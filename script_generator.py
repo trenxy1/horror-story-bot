@@ -104,8 +104,9 @@ def generate_teaser(full_story_text: str) -> str:
         config.SYSTEM_PROMPT_TEASER, user_prompt, timeout=60, max_tokens=400,
         label="teaser",
     )
-    
-    def generate_title(full_story_text: str) -> str:
+
+
+def generate_title(full_story_text: str) -> str:
     user_prompt = f"FULL STORY TEXT:\n\n{full_story_text}\n\nWrite the title now."
     title = _generate_with_full_retry(
         config.SYSTEM_PROMPT_TITLE, user_prompt, timeout=30, max_tokens=60,
@@ -123,3 +124,5 @@ if __name__ == "__main__":
     print(story)
     print("\n=== TEASER ===")
     print(generate_teaser(story))
+    print("\n=== TITLE ===")
+    print(generate_title(story))
