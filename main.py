@@ -80,8 +80,9 @@ def process_story_and_teaser(theme: str, do_upload: bool) -> list[str]:
     if do_upload:
         import youtube_upload
 
-        base_title = "A Horror Story You Won't Forget"
-
+        base_title = script_generator.generate_title(story_text)
+        print(f"  Generated title: {base_title}")
+        
         long_description = f"{story_text}\n\n#HorrorStory #ScaryStory #Creepypasta"
         long_video_id = youtube_upload.upload_video(
             long_path, base_title, long_description, privacy="public"
