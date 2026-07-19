@@ -120,6 +120,7 @@ RULES:
 - Same fictional-only, atmosphere-over-gore rules as the full story.
 - Output ONLY the teaser text. No title, no preamble, no markdown.
 """
+
 SYSTEM_PROMPT_TITLE = """You write YouTube titles for horror story videos.
 You will be given the FULL STORY TEXT. Write ONE title for it.
 
@@ -140,20 +141,15 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "en-GB-RyanNeural")
 TTS_RATE = os.environ.get("TTS_RATE", "-8%")
 
 # ---------- AI IMAGE GENERATION (Pollinations.ai — free, no API key) ----------
-# Pexels is no longer used for this bot — every image is custom-generated to
-# match that specific moment of the story, which is what gets the "clean,
-# cinematic" look instead of generic stock photos.
 IMAGE_STYLE_SUFFIX = (
     "cinematic horror photography, moody blue and purple lighting, high detail, "
     "film grain, dramatic shadows, atmospheric, 8k quality"
 )
-WORDS_PER_SCENE_LONG = 45     # ~35-45 images for a 1500-2000 word story
-WORDS_PER_SCENE_TEASER = 15   # ~7-9 images for a 100-140 word teaser (faster pace, matches Shorts style)
-IMAGE_GEN_MAX_WORKERS = 4     # parallel image generations at once
+IMAGE_GEN_MAX_WORKERS = 1
 
 # ---------- YOUTUBE ----------
 YOUTUBE_CLIENT_SECRET_FILE = str(BASE_DIR / "client_secret.json")
 YOUTUBE_TOKEN_FILE = str(BASE_DIR / "youtube_token.json")
 YOUTUBE_TOKEN_JSON_ENV = os.environ.get("YOUTUBE_TOKEN_JSON", "")
-YOUTUBE_CATEGORY_ID = "24"  # Entertainment
+YOUTUBE_CATEGORY_ID = "24"
 YOUTUBE_DEFAULT_TAGS = ["horror story", "scary story", "creepypasta", "horror narration", "AI horror"]
